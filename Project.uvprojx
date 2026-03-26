@@ -583,6 +583,16 @@
               <FileType>5</FileType>
               <FilePath>.\System\Delay.h</FilePath>
             </File>
+            <File>
+              <FileName>sys.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\System\sys.c</FilePath>
+            </File>
+            <File>
+              <FileName>sys.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\System\sys.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -654,9 +664,24 @@
               <FilePath>.\Hardware\LED.c</FilePath>
             </File>
             <File>
-              <FileName>LED.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>.\Hardware\LED.h</FilePath>
+              <FileName>GUI.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\GUI.c</FilePath>
+            </File>
+            <File>
+              <FileName>lcd.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\lcd.c</FilePath>
+            </File>
+            <File>
+              <FileName>test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\test.c</FilePath>
+            </File>
+            <File>
+              <FileName>MySPI.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\MySPI.c</FilePath>
             </File>
           </Files>
         </Group>

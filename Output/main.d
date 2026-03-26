@@ -31,3 +31,6 @@
 .\output\main.o: User\freertos_demo.h
 .\output\main.o: .\System\Delay.h
 .\output\main.o: .\Hardware\LED.h
+.\output\main.o: .\Hardware\lcd.h
+.\output\main.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdlib.h
+.\output\main.o: .\System\sys.h

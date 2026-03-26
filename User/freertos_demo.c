@@ -5,6 +5,8 @@
 
 /*其他头文件********************************************************************************************/
 #include "LED.h"
+#include "lcd.h"
+#include "gui.h"
 /******************************************************************************************************/
 /*FreeRTOS配置*/
 
@@ -77,6 +79,7 @@ void start_task(void *pvParameters)
                 (void*          )NULL,
                 (UBaseType_t    )TASK2_PRIO,
                 (TaskHandle_t*  )&Task2Task_Handler);
+    
     vTaskDelete(StartTask_Handler); /* 删除开始任务 */
     taskEXIT_CRITICAL();            /* 退出临界区 */
 }
@@ -94,6 +97,8 @@ void task1(void *pvParameters)
     {
 		LED_ON();
         vTaskDelay(200);
+        LED_OFF();
+        vTaskDelay(300);                           /* 延时300ticks */
   
     }
 }
@@ -105,9 +110,33 @@ void task1(void *pvParameters)
  */
 void task2(void *pvParameters)
 {  
+    u16 bg_color = WHITE;
+    u32 frame = 0;
+
+ //   LCD_Init();
+
     while(1)
     {
-		LED_OFF();
-        vTaskDelay(300);                           /* 延时300ticks */
+        if (bg_color == WHITE)
+        {
+            bg_color = BLUE;
+            POINT_COLOR = YELLOW;
+            BACK_COLOR = BLUE;
+        }
+        else
+        {
+            bg_color = WHITE;
+            POINT_COLOR = RED;
+            BACK_COLOR = WHITE;
+        }
+
+        LCD_Clear(bg_color);
+        LCD_DrawRectangle(3, 3, 124, 124);
+        LCD_ShowString(10, 25, 16, (u8 *)"Task2 LCD Test", 1);
+        LCD_ShowString(10, 50, 16, (u8 *)"Frame:", 1);
+        LCD_ShowNum(62, 50, frame++, 5, 16);
+
+   
+        vTaskDelay(500);                           /* 延时500ticks */
     }
 }

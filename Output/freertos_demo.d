@@ -40,3 +40,7 @@
 .\output\freertos_demo.o: .\Library\stm32f10x_usart.h
 .\output\freertos_demo.o: .\Library\stm32f10x_wwdg.h
 .\output\freertos_demo.o: .\Library\misc.h
+.\output\freertos_demo.o: .\Hardware\lcd.h
+.\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdlib.h
+.\output\freertos_demo.o: .\System\sys.h
+.\output\freertos_demo.o: .\Hardware\gui.h
