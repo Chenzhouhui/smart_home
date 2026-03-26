@@ -1,3 +1,4 @@
 Load "c:\\Users\\26919\\Desktop\\ÎïÁªÍø\\Output\\Project.axf" 
-Erase Done.Programming Done.Verify OK.Application running ...
-Flash Load finished at 23:01:20
+Internal command error
+Error: Flash Download failed  -  Target DLL has been cancelled
+Flash Load finished at 23:33:57
