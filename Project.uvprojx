@@ -593,6 +593,11 @@
               <FileType>5</FileType>
               <FilePath>.\System\sys.h</FilePath>
             </File>
+            <File>
+              <FileName>UART.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\System\UART.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -674,14 +679,39 @@
               <FilePath>.\Hardware\lcd.c</FilePath>
             </File>
             <File>
-              <FileName>test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\Hardware\test.c</FilePath>
-            </File>
-            <File>
               <FileName>MySPI.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Hardware\MySPI.c</FilePath>
+            </File>
+            <File>
+              <FileName>AHT20.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\AHT20.c</FilePath>
+            </File>
+            <File>
+              <FileName>MyI2C.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\MyI2C.c</FilePath>
+            </File>
+            <File>
+              <FileName>MQ.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\MQ.c</FilePath>
+            </File>
+            <File>
+              <FileName>HC_SR501.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\HC_SR501.c</FilePath>
+            </File>
+            <File>
+              <FileName>ESP8266.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\ESP8266.c</FilePath>
+            </File>
+            <File>
+              <FileName>onenet.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\onenet.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -11,7 +11,9 @@
 .\output\freertos_demo.o: .\FreeRTOS\include\mpu_wrappers.h
 .\output\freertos_demo.o: .\FreeRTOS\include\task.h
 .\output\freertos_demo.o: .\FreeRTOS\include\list.h
-.\output\freertos_demo.o: .\Hardware\LED.h
+.\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\string.h
+.\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdio.h
+.\output\freertos_demo.o: .\System\UART.h
 .\output\freertos_demo.o: .\Start\stm32f10x.h
 .\output\freertos_demo.o: .\Start\core_cm3.h
 .\output\freertos_demo.o: .\Start\system_stm32f10x.h
@@ -40,7 +42,14 @@
 .\output\freertos_demo.o: .\Library\stm32f10x_usart.h
 .\output\freertos_demo.o: .\Library\stm32f10x_wwdg.h
 .\output\freertos_demo.o: .\Library\misc.h
+.\output\freertos_demo.o: .\Hardware\LED.h
 .\output\freertos_demo.o: .\Hardware\lcd.h
 .\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdlib.h
 .\output\freertos_demo.o: .\System\sys.h
 .\output\freertos_demo.o: .\Hardware\gui.h
+.\output\freertos_demo.o: .\Hardware\pic.h
+.\output\freertos_demo.o: .\Hardware\AHT20.h
+.\output\freertos_demo.o: .\Hardware\MQ.h
+.\output\freertos_demo.o: .\Hardware\HC_SR501.h
+.\output\freertos_demo.o: .\Hardware\ESP8266.h
+.\output\freertos_demo.o: .\Hardware\onenet.h

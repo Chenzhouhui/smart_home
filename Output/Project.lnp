@@ -30,6 +30,7 @@
 ".\output\system_stm32f10x.o"
 ".\output\delay.o"
 ".\output\sys.o"
+".\output\uart.o"
 ".\output\croutine.o"
 ".\output\event_groups.o"
 ".\output\list.o"
@@ -42,8 +43,13 @@
 ".\output\led.o"
 ".\output\gui.o"
 ".\output\lcd.o"
-".\output\test.o"
 ".\output\myspi.o"
+".\output\aht20.o"
+".\output\myi2c.o"
+".\output\mq.o"
+".\output\hc_sr501.o"
+".\output\esp8266.o"
+".\output\onenet.o"
 --strict --scatter ".\Output\Project.sct"
 --summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
 --info sizes --info totals --info unused --info veneers

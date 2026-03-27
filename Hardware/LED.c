@@ -11,12 +11,12 @@ void LED_Init(void)
 	GPIO_Init(GPIOC, &GPIO_InitStructure);
 }
 
-void LED_ON(void)
+void LED_OFF(void)
 {
 	GPIO_ResetBits(GPIOC, GPIO_Pin_13);
 }
 
-void LED_OFF(void)
+void LED_ON(void)
 {
 	GPIO_SetBits(GPIOC, GPIO_Pin_13);
 }

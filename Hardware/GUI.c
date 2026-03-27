@@ -734,24 +734,60 @@ void Gui_StrCenter(u16 x, u16 y, u16 fc, u16 bc, u8 *str,u8 size,u8 mode)
 } 
  
 /*****************************************************************************
- * @name       :void Gui_Drawbmp16(u16 x,u16 y,const unsigned char *p)
+ * @name       :void Gui_Drawbmp16Ex(u16 x,u16 y,u16 width,u16 height,const unsigned char *p)
  * @date       :2018-08-09 
- * @function   :Display a 16-bit BMP image
+ * @function   :Display a 16-bit BMP image with custom size
  * @parameters :x:the bebinning x coordinate of the BMP image
                 y:the bebinning y coordinate of the BMP image
-								p:the start address of image array
+                                width:the width of image
+                                height:the height of image
+                                p:the start address of image array (RGB565, low byte first)
  * @retvalue   :None
 ******************************************************************************/ 
-void Gui_Drawbmp16(u16 x,u16 y,const unsigned char *p) //显示40*40 QQ图片
+void Gui_Drawbmp16Ex(u16 x,u16 y,u16 width,u16 height,const unsigned char *p)
 {
-  	int i; 
-	unsigned char picH,picL; 
-	LCD_SetWindows(x,y,x+40-1,y+40-1);//窗口设置
-    for(i=0;i<40*40;i++)
-	{	
-	 	picL=*(p+i*2);	//数据低位在前
-		picH=*(p+i*2+1);				
-		Lcd_WriteData_16Bit(picH<<8|picL);  						
-	}	
-	LCD_SetWindows(0,0,lcddev.width-1,lcddev.height-1);//恢复显示窗口为全屏	
+	u32 i,total;
+	unsigned char picH,picL;
+
+	if((p==0)||(width==0)||(height==0))
+	{
+		return;
+	}
+	if((x>=lcddev.width)||(y>=lcddev.height))
+	{
+		return;
+	}
+
+	if((x+width)>lcddev.width)
+	{
+		width=lcddev.width-x;
+	}
+	if((y+height)>lcddev.height)
+	{
+		height=lcddev.height-y;
+	}
+
+	total=(u32)width*height;
+	LCD_SetWindows(x,y,x+width-1,y+height-1);
+	for(i=0;i<total;i++)
+	{
+		picL=*p++;	//数据低位在前
+		picH=*p++;
+		Lcd_WriteData_16Bit(picH<<8|picL);
+	}
+	LCD_SetWindows(0,0,lcddev.width-1,lcddev.height-1);//恢复显示窗口为全屏
+}
+
+/*****************************************************************************
+ * @name       :void Gui_Drawbmp16(u16 x,u16 y,const unsigned char *p)
+ * @date       :2018-08-09 
+ * @function   :Display a 16-bit BMP image (40x40 compatibility interface)
+ * @parameters :x:the bebinning x coordinate of the BMP image
+                y:the bebinning y coordinate of the BMP image
+                                p:the start address of image array
+ * @retvalue   :None
+******************************************************************************/ 
+void Gui_Drawbmp16(u16 x,u16 y,const unsigned char *p)
+{
+	Gui_Drawbmp16Ex(x,y,40,40,p);
 }

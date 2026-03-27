@@ -34,3 +34,6 @@
 .\output\main.o: .\Hardware\lcd.h
 .\output\main.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdlib.h
 .\output\main.o: .\System\sys.h
+.\output\main.o: .\Hardware\AHT20.h
+.\output\main.o: .\System\UART.h
+.\output\main.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdio.h
