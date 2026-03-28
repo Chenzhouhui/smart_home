@@ -73,7 +73,7 @@ void task4(void *pvParameters);             /* 任务函数 */
  * 包括: 任务句柄 任务优先级 堆栈大小 创建任务
  */
 #define TASK5_PRIO      1                   /* 任务优先级(联网任务最低) */
-#define TASK5_STK_SIZE  256                 /* 任务堆栈大小 */
+#define TASK5_STK_SIZE  1024                /* 任务堆栈大小 */
 TaskHandle_t            Task5Task_Handler;  /* 任务句柄 */
 void task5(void *pvParameters);             /* 任务函数 */
 
@@ -92,6 +92,7 @@ volatile uint8_t gMQ7_DO = 0;
 volatile float gMQ4_PPM = 0;
 volatile float gMQ7_PPM = 0;
 volatile uint8_t gHC_SR501_State = 0;
+volatile uint8_t gLED_State = 0;
 volatile uint8_t gWiFi_Connected = 0;
 volatile uint8_t gMQTT_Connected = 0;
 
@@ -356,10 +357,12 @@ void task4(void *pvParameters)
 		if(gHC_SR501_State)
         {
             LED_ON();
+            gLED_State = 1;
         }
         else
         {
             LED_OFF();
+            gLED_State = 0;
 
         }
         vTaskDelay(1000);
@@ -373,7 +376,20 @@ void task4(void *pvParameters)
  */
 void task5(void *pvParameters)
 {
-    char payload[160];
+    char payload[256];
+    int temp10;
+    int humi10;
+    int lux10;
+    int tempInt;
+    int tempFrac;
+    int humiInt;
+    int humiFrac;
+    int luxInt;
+    int luxFrac;
+    const char *ledBool;
+    const char *coBool;
+    const char *ch4Bool;
+    const char *humanBool;
 
     ESP8266_Init(115200);
 
@@ -432,20 +448,56 @@ void task5(void *pvParameters)
             }
         }
 
+        ledBool = gLED_State ? "true" : "false";
+        coBool = gMQ7_DO ? "true" : "false";
+        ch4Bool = gMQ4_DO ? "true" : "false";
+        humanBool = gHC_SR501_State ? "true" : "false";
+
+        temp10 = (int)(gAHT20_Temperature * 10.0f);
+        humi10 = (int)(gAHT20_Humidity * 10.0f);
+        lux10 = (int)(gBH1750_Lux * 10.0f);
+
+        tempInt = temp10 / 10;
+        tempFrac = temp10 % 10;
+        if (tempFrac < 0)
+        {
+            tempFrac = -tempFrac;
+        }
+
+        humiInt = humi10 / 10;
+        humiFrac = humi10 % 10;
+        if (humiFrac < 0)
+        {
+            humiFrac = -humiFrac;
+        }
+
+        luxInt = lux10 / 10;
+        luxFrac = lux10 % 10;
+        if (luxFrac < 0)
+        {
+            luxFrac = -luxFrac;
+        }
+
         snprintf(payload,
-                 sizeof(payload),
-                 "{\"temp\":%.1f,\"humi\":%.1f,\"lux\":%.1f,\"mq4\":%.0f,\"mq7\":%.0f,\"human\":%u}",
-                 gAHT20_Temperature,
-                 gAHT20_Humidity,
-                 gBH1750_Lux,
-                 gMQ4_PPM,
-                 gMQ7_PPM,
-                 gHC_SR501_State);
+             sizeof(payload),
+             "{\"id\":\"123\",\"version\":\"1.0\",\"params\":{\"temp\":{\"value\":%d.%d},\"humi\":{\"value\":%d.%d},\"lux\":{\"value\":%d.%d},\"LED\":{\"value\":%s},\"CO\":{\"value\":%s},\"CH4\":{\"value\":%s},\"human\":{\"value\":%s}}}",
+             tempInt,
+             tempFrac,
+             humiInt,
+             humiFrac,
+             luxInt,
+             luxFrac,
+             ledBool,
+             coBool,
+             ch4Bool,
+             humanBool);
 
         if(!OneNet_MQTT_Publish(MQTT_TOPIC_PUB, payload, 0, 0))
         {
             gMQTT_Connected = 0;
             printf("MQTT publish fail\r\n");
+            vTaskDelay(1000);
+            continue;
         }
         else
         {
