@@ -73,7 +73,7 @@ void task4(void *pvParameters);             /* 任务函数 */
 /* TASK5 任务 配置
  * 包括: 任务句柄 任务优先级 堆栈大小 创建任务
  */
-#define TASK5_PRIO      1                   /* 任务优先级(联网任务最低) */
+#define TASK5_PRIO      6                   /* 任务优先级*/
 #define TASK5_STK_SIZE  1024                /* 任务堆栈大小 */
 TaskHandle_t            Task5Task_Handler;  /* 任务句柄 */
 void task5(void *pvParameters);             /* 任务函数 */
