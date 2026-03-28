@@ -472,14 +472,6 @@ void task5(void *pvParameters)
 
     while(1)
     {
-        if(strstr(ESP8266_GetRxBuffer(), "CLOSED") != 0)
-        {
-            gMQTT_Connected = 0;
-            mqttSubscribed = 0;
-            printf("MQTT link closed, reconnect...\r\n");
-            ESP8266_ClearRxBuffer();
-        }
-
         if((WIFI_SSID[0] == '\0') || (WIFI_PASSWORD[0] == '\0'))
         {
             gWiFi_Connected = 0;

@@ -150,7 +150,7 @@ static uint8_t OneNet_MQTT_ConnectRaw(const char *host,
 
 	MQTT_WriteString(g_mqttPktBuf, &idx, "MQTT");
 	g_mqttPktBuf[idx++] = 0x04;
-	g_mqttPktBuf[idx++] = 0xC0;
+	g_mqttPktBuf[idx++] = 0xC2;
 	g_mqttPktBuf[idx++] = (uint8_t)(keepAliveSec >> 8);
 	g_mqttPktBuf[idx++] = (uint8_t)(keepAliveSec & 0xFF);
 
@@ -413,7 +413,7 @@ uint8_t OneNet_MQTT_Connect(const char *host,
 
 	snprintf(g_mqttCmdBuf,
 			 sizeof(g_mqttCmdBuf),
-			 "AT+MQTTCONNCFG=0,%u,1,\"\",\"\",0,0",
+			 "AT+MQTTCONNCFG=0,%u,0,\"\",\"\",0,0",
 			 keepAliveSec);
 	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 3000))
 	{
@@ -423,7 +423,7 @@ uint8_t OneNet_MQTT_Connect(const char *host,
 
 	snprintf(g_mqttCmdBuf,
 			 sizeof(g_mqttCmdBuf),
-			 "AT+MQTTCONN=0,\"%s\",%u,0",
+			 "AT+MQTTCONN=0,\"%s\",%u,1",
 			 host,
 			 port);
 	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 20000))
