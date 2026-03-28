@@ -28,6 +28,7 @@
 #define MQTT_USERNAME   "6S26Zkf84P"
 #define MQTT_PASSWORD   "version=2018-10-31&res=products%2F6S26Zkf84P%2Fdevices%2FESP8266&et=1815951631&method=md5&sign=oKnA0gT%2FA9cyFOj41SoTPw%3D%3D"
 #define MQTT_TOPIC_PUB  "$sys/6S26Zkf84P/ESP8266/thing/property/post"
+#define MQTT_TOPIC_SUB  "$sys/6S26Zkf84P/ESP8266/thing/property/set"
 
 /* START_TASK 任务 配置
  * 包括: 任务句柄 任务优先级 堆栈大小 创建任务
@@ -93,8 +94,71 @@ volatile float gMQ4_PPM = 0;
 volatile float gMQ7_PPM = 0;
 volatile uint8_t gHC_SR501_State = 0;
 volatile uint8_t gLED_State = 0;
+volatile uint8_t gLED_CloudCtrl = 0;
+volatile uint8_t gLED_CloudState = 0;
 volatile uint8_t gWiFi_Connected = 0;
 volatile uint8_t gMQTT_Connected = 0;
+
+static int find_pattern(const uint8_t *buf, uint16_t len, const char *pat)
+{
+    uint16_t i;
+    uint16_t j;
+    uint16_t patLen = (uint16_t)strlen(pat);
+
+    if ((buf == 0) || (pat == 0) || (patLen == 0) || (len < patLen))
+    {
+        return 0;
+    }
+
+    for (i = 0; i <= (uint16_t)(len - patLen); i++)
+    {
+        for (j = 0; j < patLen; j++)
+        {
+            if (buf[i + j] != (uint8_t)pat[j])
+            {
+                break;
+            }
+        }
+        if (j == patLen)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void process_cloud_led_cmd(void)
+{
+    uint8_t rxBuf[ESP8266_RX_BUFFER_SIZE];
+    uint16_t len;
+    uint8_t ledChanged = 0;
+
+    len = ESP8266_CopyRxBuffer(rxBuf, sizeof(rxBuf));
+    if (len == 0)
+    {
+        return;
+    }
+
+    if (find_pattern(rxBuf, len, "\"LED\":true") || find_pattern(rxBuf, len, "\"LED\": true"))
+    {
+        gLED_CloudCtrl = 1;
+        gLED_CloudState = 1;
+        ledChanged = 1;
+    }
+    else if (find_pattern(rxBuf, len, "\"LED\":false") || find_pattern(rxBuf, len, "\"LED\": false"))
+    {
+        gLED_CloudCtrl = 1;
+        gLED_CloudState = 0;
+        ledChanged = 1;
+    }
+
+    if (ledChanged)
+    {
+        printf("Cloud LED cmd -> %s\r\n", gLED_CloudState ? "ON" : "OFF");
+        ESP8266_ClearRxBuffer();
+    }
+}
 
 
 
@@ -353,8 +417,20 @@ void task4(void *pvParameters)
     while(1)
     {
         gHC_SR501_State = HC_SR501_ReadState();
- //       printf("%d", gHC_SR501_State);
-		if(gHC_SR501_State)
+        if(gLED_CloudCtrl)
+        {
+            if(gLED_CloudState)
+            {
+                LED_ON();
+                gLED_State = 1;
+            }
+            else
+            {
+                LED_OFF();
+                gLED_State = 0;
+            }
+        }
+        else if(gHC_SR501_State)
         {
             LED_ON();
             gLED_State = 1;
@@ -377,6 +453,7 @@ void task4(void *pvParameters)
 void task5(void *pvParameters)
 {
     char payload[256];
+    uint8_t mqttSubscribed = 0;
     int temp10;
     int humi10;
     int lux10;
@@ -395,10 +472,19 @@ void task5(void *pvParameters)
 
     while(1)
     {
+        if(strstr(ESP8266_GetRxBuffer(), "CLOSED") != 0)
+        {
+            gMQTT_Connected = 0;
+            mqttSubscribed = 0;
+            printf("MQTT link closed, reconnect...\r\n");
+            ESP8266_ClearRxBuffer();
+        }
+
         if((WIFI_SSID[0] == '\0') || (WIFI_PASSWORD[0] == '\0'))
         {
             gWiFi_Connected = 0;
             gMQTT_Connected = 0;
+            mqttSubscribed = 0;
             printf("Set WIFI_SSID/WIFI_PASSWORD in freertos_demo.c\r\n");
             vTaskDelay(5000);
             continue;
@@ -415,6 +501,7 @@ void task5(void *pvParameters)
             {
                 gWiFi_Connected = 0;
                 gMQTT_Connected = 0;
+                mqttSubscribed = 0;
                 printf("ESP8266 WiFi connect fail\r\n");
                 vTaskDelay(3000);
                 continue;
@@ -431,6 +518,7 @@ void task5(void *pvParameters)
                                    120))
             {
                 gMQTT_Connected = 1;
+                mqttSubscribed = 0;
                 printf("MQTT connected\r\n");
             }
             else
@@ -447,6 +535,25 @@ void task5(void *pvParameters)
                 continue;
             }
         }
+
+        if(!mqttSubscribed)
+        {
+            if(OneNet_MQTT_Subscribe(MQTT_TOPIC_SUB, 0))
+            {
+                mqttSubscribed = 1;
+                printf("MQTT subscribe ok: %s\r\n", MQTT_TOPIC_SUB);
+            }
+            else
+            {
+                gMQTT_Connected = 0;
+                mqttSubscribed = 0;
+                printf("MQTT subscribe fail\r\n");
+                vTaskDelay(1000);
+                continue;
+            }
+        }
+
+        process_cloud_led_cmd();
 
         ledBool = gLED_State ? "true" : "false";
         coBool = gMQ7_DO ? "true" : "false";

@@ -41,6 +41,49 @@ static uint16_t MQTT_EncodeLength(uint8_t *buf, uint32_t length)
 	return count;
 }
 
+static uint8_t MQTT_WaitSubAck(uint16_t packetId, uint32_t timeoutMs)
+{
+	uint16_t len;
+	uint16_t i;
+	uint8_t idMsb = (uint8_t)(packetId >> 8);
+	uint8_t idLsb = (uint8_t)(packetId & 0xFF);
+
+	while (timeoutMs > 0)
+	{
+		len = ESP8266_CopyRxBuffer(g_mqttTmpBuf, sizeof(g_mqttTmpBuf));
+		if (len >= 5)
+		{
+			for (i = 0; i + 4 < len; i++)
+			{
+				if ((g_mqttTmpBuf[i] == 0x90) &&
+					(g_mqttTmpBuf[i + 1] == 0x03) &&
+					(g_mqttTmpBuf[i + 2] == idMsb) &&
+					(g_mqttTmpBuf[i + 3] == idLsb))
+				{
+					return 1;
+				}
+			}
+		}
+
+		if (strstr(ESP8266_GetRxBuffer(), "CLOSED") != 0)
+		{
+			return 0;
+		}
+
+		OneNet_DelayMs(20);
+		if (timeoutMs >= 20)
+		{
+			timeoutMs -= 20;
+		}
+		else
+		{
+			timeoutMs = 0;
+		}
+	}
+
+	return 0;
+}
+
 static void MQTT_WriteString(uint8_t *buf, uint16_t *index, const char *str)
 {
 	uint16_t len = (uint16_t)strlen(str);
@@ -107,7 +150,7 @@ static uint8_t OneNet_MQTT_ConnectRaw(const char *host,
 
 	MQTT_WriteString(g_mqttPktBuf, &idx, "MQTT");
 	g_mqttPktBuf[idx++] = 0x04;
-	g_mqttPktBuf[idx++] = 0xC2;
+	g_mqttPktBuf[idx++] = 0xC0;
 	g_mqttPktBuf[idx++] = (uint8_t)(keepAliveSec >> 8);
 	g_mqttPktBuf[idx++] = (uint8_t)(keepAliveSec & 0xFF);
 
@@ -370,7 +413,7 @@ uint8_t OneNet_MQTT_Connect(const char *host,
 
 	snprintf(g_mqttCmdBuf,
 			 sizeof(g_mqttCmdBuf),
-			 "AT+MQTTCONNCFG=0,%u,0,\"\",\"\",0,0",
+			 "AT+MQTTCONNCFG=0,%u,1,\"\",\"\",0,0",
 			 keepAliveSec);
 	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 3000))
 	{
@@ -380,7 +423,7 @@ uint8_t OneNet_MQTT_Connect(const char *host,
 
 	snprintf(g_mqttCmdBuf,
 			 sizeof(g_mqttCmdBuf),
-			 "AT+MQTTCONN=0,\"%s\",%u,1",
+			 "AT+MQTTCONN=0,\"%s\",%u,0",
 			 host,
 			 port);
 	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 20000))
@@ -461,7 +504,13 @@ uint8_t OneNet_MQTT_Publish(const char *topic, const char *payload, uint8_t qos,
 
 uint8_t OneNet_MQTT_Subscribe(const char *topic, uint8_t qos)
 {
-	char cmd[192];
+	uint8_t lenField[4];
+	uint16_t idx = 0;
+	uint16_t topicLen;
+	uint16_t remainLen;
+	uint16_t lenBytes;
+	static uint16_t s_packetId = 1;
+	uint16_t packetId;
 
 	if (topic == 0)
 	{
@@ -473,13 +522,46 @@ uint8_t OneNet_MQTT_Subscribe(const char *topic, uint8_t qos)
 		qos = 0;
 	}
 
-	snprintf(cmd,
-			 sizeof(cmd),
+	if (g_MqttUseRawTcp)
+	{
+		topicLen = (uint16_t)strlen(topic);
+		remainLen = (uint16_t)(2 + 2 + topicLen + 1);
+		packetId = s_packetId++;
+
+		g_mqttPktBuf[idx++] = 0x82;
+		lenBytes = MQTT_EncodeLength(lenField, remainLen);
+		memcpy(&g_mqttPktBuf[idx], lenField, lenBytes);
+		idx += lenBytes;
+
+		g_mqttPktBuf[idx++] = (uint8_t)(packetId >> 8);
+		g_mqttPktBuf[idx++] = (uint8_t)(packetId & 0xFF);
+		g_mqttPktBuf[idx++] = (uint8_t)(topicLen >> 8);
+		g_mqttPktBuf[idx++] = (uint8_t)(topicLen & 0xFF);
+		memcpy(&g_mqttPktBuf[idx], topic, topicLen);
+		idx += topicLen;
+		g_mqttPktBuf[idx++] = qos;
+
+		ESP8266_ClearRxBuffer();
+		if (!ESP8266_SendRaw(g_mqttPktBuf, idx))
+		{
+			return 0;
+		}
+
+		if (!MQTT_WaitSubAck(packetId, 3000))
+		{
+			return 0;
+		}
+
+		return 1;
+	}
+
+	snprintf(g_mqttCmdBuf,
+			 sizeof(g_mqttCmdBuf),
 			 "AT+MQTTSUB=0,\"%s\",%u",
 			 topic,
 			 qos);
 
-	if (!ESP8266_SendAT(cmd, "OK", 5000))
+	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 5000))
 	{
 		return 0;
 	}
