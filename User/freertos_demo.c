@@ -128,11 +128,120 @@ static int find_pattern(const uint8_t *buf, uint16_t len, const char *pat)
     return 0;
 }
 
+static uint8_t mqtt_decode_remaining_len(const uint8_t *buf,
+                                         uint16_t len,
+                                         uint16_t start,
+                                         uint32_t *remainLen,
+                                         uint16_t *usedBytes)
+{
+    uint32_t mul = 1;
+    uint32_t val = 0;
+    uint16_t idx = start;
+    uint16_t cnt = 0;
+    uint8_t byte;
+
+    if ((buf == 0) || (remainLen == 0) || (usedBytes == 0) || (start >= len))
+    {
+        return 0;
+    }
+
+    do
+    {
+        if (idx >= len)
+        {
+            return 0;
+        }
+
+        byte = buf[idx++];
+        cnt++;
+        val += (uint32_t)(byte & 0x7F) * mul;
+        mul *= 128;
+
+        if (cnt > 4)
+        {
+            return 0;
+        }
+    } while (byte & 0x80);
+
+    *remainLen = val;
+    *usedBytes = cnt;
+    return 1;
+}
+
+static void process_raw_mqtt_puback(const uint8_t *buf, uint16_t len)
+{
+    uint16_t i;
+
+    if (!OneNet_MQTT_IsRawMode())
+    {
+        return;
+    }
+
+    for (i = 0; i < len; i++)
+    {
+        uint8_t header = buf[i];
+        uint8_t qos = (uint8_t)((header >> 1) & 0x03);
+        uint32_t remainLen;
+        uint16_t lenBytes;
+        uint32_t pktEnd;
+        uint32_t pos;
+        uint16_t topicLen;
+        uint16_t packetId;
+        uint8_t ack[4];
+
+        if ((header & 0xF0) != 0x30)
+        {
+            continue;
+        }
+
+        if (qos != 1)
+        {
+            continue;
+        }
+
+        if (!mqtt_decode_remaining_len(buf, len, (uint16_t)(i + 1), &remainLen, &lenBytes))
+        {
+            continue;
+        }
+
+        pktEnd = (uint32_t)i + 1U + (uint32_t)lenBytes + remainLen;
+        if (pktEnd > len)
+        {
+            continue;
+        }
+
+        pos = (uint32_t)i + 1U + (uint32_t)lenBytes;
+        if (pos + 2U > pktEnd)
+        {
+            continue;
+        }
+
+        topicLen = (uint16_t)(((uint16_t)buf[pos] << 8) | buf[pos + 1U]);
+        pos += 2U;
+        if (pos + topicLen + 2U > pktEnd)
+        {
+            continue;
+        }
+
+        pos += topicLen;
+        packetId = (uint16_t)(((uint16_t)buf[pos] << 8) | buf[pos + 1U]);
+
+        ack[0] = 0x40;
+        ack[1] = 0x02;
+        ack[2] = (uint8_t)(packetId >> 8);
+        ack[3] = (uint8_t)(packetId & 0xFF);
+        ESP8266_SendRaw(ack, 4);
+
+        i = (uint16_t)(pktEnd - 1U);
+    }
+}
+
 static void process_cloud_led_cmd(void)
 {
     uint8_t rxBuf[ESP8266_RX_BUFFER_SIZE];
     uint16_t len;
     uint8_t ledChanged = 0;
+    uint8_t cmdSeen = 0;
 
     len = ESP8266_CopyRxBuffer(rxBuf, sizeof(rxBuf));
     if (len == 0)
@@ -140,24 +249,55 @@ static void process_cloud_led_cmd(void)
         return;
     }
 
+    process_raw_mqtt_puback(rxBuf, len);
+
     if (find_pattern(rxBuf, len, "\"LED\":true") || find_pattern(rxBuf, len, "\"LED\": true"))
     {
+        cmdSeen = 1;
+        if ((gLED_CloudCtrl == 0) || (gLED_CloudState != 1))
+        {
+            ledChanged = 1;
+        }
         gLED_CloudCtrl = 1;
         gLED_CloudState = 1;
-        ledChanged = 1;
     }
     else if (find_pattern(rxBuf, len, "\"LED\":false") || find_pattern(rxBuf, len, "\"LED\": false"))
     {
+        cmdSeen = 1;
+        if ((gLED_CloudCtrl == 0) || (gLED_CloudState != 0))
+        {
+            ledChanged = 1;
+        }
         gLED_CloudCtrl = 1;
         gLED_CloudState = 0;
-        ledChanged = 1;
     }
 
     if (ledChanged)
     {
         printf("Cloud LED cmd -> %s\r\n", gLED_CloudState ? "ON" : "OFF");
+    }
+
+    if (cmdSeen)
+    {
         ESP8266_ClearRxBuffer();
     }
+}
+
+static uint8_t cloud_link_is_lost(const char *rsp)
+{
+    if (rsp == 0)
+    {
+        return 0;
+    }
+
+    if ((strstr(rsp, "CLOSED") != 0) ||
+        (strstr(rsp, "WIFI DISCONNECT") != 0) ||
+        (strstr(rsp, "+MQTTDISCONNECTED") != 0))
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 
@@ -430,13 +570,15 @@ void task4(void *pvParameters)
                 gLED_State = 0;
             }
         }
-        else if(gHC_SR501_State)
-        {
-            LED_ON();
-            gLED_State = 1;
-        }
         else
         {
+            /* 仅保留云端控制，注释掉人体检测自动开灯逻辑
+            else if(gHC_SR501_State)
+            {
+                LED_ON();
+                gLED_State = 1;
+            }
+            */
             LED_OFF();
             gLED_State = 0;
 
@@ -450,10 +592,16 @@ void task4(void *pvParameters)
  * @param       pvParameters : 传入参数(未用到)
  * @retval      无
  */
+//static char payload[512];
 void task5(void *pvParameters)
 {
-    char payload[256];
+    static char payload[256];
+    uint16_t report_cnt = 0;
+    uint16_t ping_cnt = 0;
     uint8_t mqttSubscribed = 0;
+    uint8_t publish_fail_cnt = 0;
+    uint32_t report_id = 1;
+    const char *rsp;
     int temp10;
     int humi10;
     int lux10;
@@ -463,6 +611,13 @@ void task5(void *pvParameters)
     int humiFrac;
     int luxInt;
     int luxFrac;
+    float temperatureSnap;
+    float humiditySnap;
+    float luxSnap;
+    uint8_t ledStateSnap;
+    uint8_t mq7DoSnap;
+    uint8_t mq4DoSnap;
+    uint8_t humanSnap;
     const char *ledBool;
     const char *coBool;
     const char *ch4Bool;
@@ -477,6 +632,8 @@ void task5(void *pvParameters)
             gWiFi_Connected = 0;
             gMQTT_Connected = 0;
             mqttSubscribed = 0;
+            report_cnt = 0;
+            ping_cnt = 0;
             printf("Set WIFI_SSID/WIFI_PASSWORD in freertos_demo.c\r\n");
             vTaskDelay(5000);
             continue;
@@ -494,6 +651,8 @@ void task5(void *pvParameters)
                 gWiFi_Connected = 0;
                 gMQTT_Connected = 0;
                 mqttSubscribed = 0;
+                report_cnt = 0;
+                ping_cnt = 0;
                 printf("ESP8266 WiFi connect fail\r\n");
                 vTaskDelay(3000);
                 continue;
@@ -511,6 +670,9 @@ void task5(void *pvParameters)
             {
                 gMQTT_Connected = 1;
                 mqttSubscribed = 0;
+                report_cnt = 0;
+                ping_cnt = 0;
+                publish_fail_cnt = 0;
                 printf("MQTT connected\r\n");
             }
             else
@@ -539,22 +701,81 @@ void task5(void *pvParameters)
             {
                 gMQTT_Connected = 0;
                 mqttSubscribed = 0;
+                report_cnt = 0;
+                ping_cnt = 0;
                 printf("MQTT subscribe fail\r\n");
                 vTaskDelay(1000);
                 continue;
             }
         }
 
+        rsp = ESP8266_GetRxBuffer();
+        if(cloud_link_is_lost(rsp))
+        {
+            if(strstr(rsp, "WIFI DISCONNECT") != 0)
+            {
+                gWiFi_Connected = 0;
+            }
+            gMQTT_Connected = 0;
+            mqttSubscribed = 0;
+            report_cnt = 0;
+            ping_cnt = 0;
+            publish_fail_cnt = 0;
+            printf("MQTT link lost, reconnect\r\n");
+            ESP8266_ClearRxBuffer();
+            vTaskDelay(500);
+            continue;
+        }
+
         process_cloud_led_cmd();
 
-        ledBool = gLED_State ? "true" : "false";
-        coBool = gMQ7_DO ? "true" : "false";
-        ch4Bool = gMQ4_DO ? "true" : "false";
-        humanBool = gHC_SR501_State ? "true" : "false";
+        if(ESP8266_GetRxLength() > (ESP8266_RX_BUFFER_SIZE * 3 / 4))
+        {
+            ESP8266_ClearRxBuffer();
+        }
 
-        temp10 = (int)(gAHT20_Temperature * 10.0f);
-        humi10 = (int)(gAHT20_Humidity * 10.0f);
-        lux10 = (int)(gBH1750_Lux * 10.0f);
+        ping_cnt++;
+        if(ping_cnt >= 200)
+        {
+            ping_cnt = 0;
+            if(!OneNet_MQTT_Ping())
+            {
+                gMQTT_Connected = 0;
+                mqttSubscribed = 0;
+                report_cnt = 0;
+                publish_fail_cnt = 0;
+                printf("MQTT ping fail, reconnect\r\n");
+                vTaskDelay(500);
+                continue;
+            }
+        }
+
+        report_cnt++;
+        if(report_cnt < 50)
+        {
+            vTaskDelay(100);
+            continue;
+        }
+        report_cnt = 0;
+
+        taskENTER_CRITICAL();
+        temperatureSnap = gAHT20_Temperature;
+        humiditySnap = gAHT20_Humidity;
+        luxSnap = gBH1750_Lux;
+        ledStateSnap = gLED_State;
+        mq7DoSnap = gMQ7_DO;
+        mq4DoSnap = gMQ4_DO;
+        humanSnap = gHC_SR501_State;
+        taskEXIT_CRITICAL();
+
+        ledBool = ledStateSnap ? "true" : "false";
+        coBool = mq7DoSnap ? "true" : "false";
+        ch4Bool = mq4DoSnap ? "true" : "false";
+        humanBool = humanSnap ? "true" : "false";
+
+        temp10 = (int)(temperatureSnap * 10.0f);
+        humi10 = (int)(humiditySnap * 10.0f);
+        lux10 = (int)(luxSnap * 10.0f);
 
         tempInt = temp10 / 10;
         tempFrac = temp10 % 10;
@@ -579,7 +800,8 @@ void task5(void *pvParameters)
 
         snprintf(payload,
              sizeof(payload),
-             "{\"id\":\"123\",\"version\":\"1.0\",\"params\":{\"temp\":{\"value\":%d.%d},\"humi\":{\"value\":%d.%d},\"lux\":{\"value\":%d.%d},\"LED\":{\"value\":%s},\"CO\":{\"value\":%s},\"CH4\":{\"value\":%s},\"human\":{\"value\":%s}}}",
+             "{\"id\":\"%lu\",\"version\":\"1.0\",\"params\":{\"temp\":{\"value\":%d.%d},\"humi\":{\"value\":%d.%d},\"lux\":{\"value\":%d.%d},\"LED\":{\"value\":%s},\"CO\":{\"value\":%s},\"CH4\":{\"value\":%s},\"human\":{\"value\":%s}}}",
+             (unsigned long)report_id,
              tempInt,
              tempFrac,
              humiInt,
@@ -593,16 +815,48 @@ void task5(void *pvParameters)
 
         if(!OneNet_MQTT_Publish(MQTT_TOPIC_PUB, payload, 0, 0))
         {
-            gMQTT_Connected = 0;
-            printf("MQTT publish fail\r\n");
+            rsp = ESP8266_GetRxBuffer();
+            publish_fail_cnt++;
+            printf("MQTT publish fail(%d/3)\r\n", publish_fail_cnt);
+            printf("PUB rsp: %s\r\n", rsp);
+
+            if(cloud_link_is_lost(rsp))
+            {
+                if(strstr(rsp, "WIFI DISCONNECT") != 0)
+                {
+                    gWiFi_Connected = 0;
+                }
+                gMQTT_Connected = 0;
+                mqttSubscribed = 0;
+                report_cnt = 0;
+                ping_cnt = 0;
+                publish_fail_cnt = 0;
+                printf("MQTT reconnect by link lost\r\n");
+                ESP8266_ClearRxBuffer();
+                vTaskDelay(500);
+                continue;
+            }
+
+            if(publish_fail_cnt >= 3)
+            {
+                gMQTT_Connected = 0;
+                mqttSubscribed = 0;
+                report_cnt = 0;
+                ping_cnt = 0;
+                publish_fail_cnt = 0;
+                printf("MQTT reconnect triggered\r\n");
+            }
+
             vTaskDelay(1000);
             continue;
         }
         else
         {
+            publish_fail_cnt = 0;
+            report_id++;
             printf("MQTT pub: %s\r\n", payload);
         }
 
-        vTaskDelay(5000);
+        vTaskDelay(100);
     }
 }

@@ -194,6 +194,11 @@ int8_t OneNet_MQTT_GetConnAckCode(void)
 	return g_MqttConnAckCode;
 }
 
+uint8_t OneNet_MQTT_IsRawMode(void)
+{
+	return g_MqttUseRawTcp;
+}
+
 void mqtt_login_init(char *ProductKey, char *DeviceName, char *DeviceSecret)
 {
 	if ((ProductKey == 0) || (DeviceName == 0) || (DeviceSecret == 0))
@@ -562,6 +567,26 @@ uint8_t OneNet_MQTT_Subscribe(const char *topic, uint8_t qos)
 			 qos);
 
 	if (!ESP8266_SendAT(g_mqttCmdBuf, "OK", 5000))
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
+uint8_t OneNet_MQTT_Ping(void)
+{
+	if (g_MqttUseRawTcp)
+	{
+		uint8_t pkt[2] = {0xC0, 0x00};
+		if (!ESP8266_SendRaw(pkt, 2))
+		{
+			return 0;
+		}
+		return 1;
+	}
+
+	if (!ESP8266_SendAT("AT+MQTTPING=0", "OK", 3000))
 	{
 		return 0;
 	}

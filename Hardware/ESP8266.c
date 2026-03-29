@@ -220,6 +220,7 @@ uint8_t ESP8266_SendRaw(const uint8_t *data, uint16_t len)
 {
    char cmd[32];
    uint16_t i;
+   uint32_t timeoutMs = 8000;
 
    if ((data == 0) || (len == 0))
    {
@@ -238,11 +239,24 @@ uint8_t ESP8266_SendRaw(const uint8_t *data, uint16_t len)
       ESP8266_SendByte(data[i]);
    }
 
-   if (!ESP8266_WaitFor("SEND OK", 5000))
+   while (timeoutMs--)
    {
-      return 0;
+      if (ESP8266_BufferContains("SEND OK"))
+      {
+         return 1;
+      }
+      if (ESP8266_BufferContains("Recv"))
+      {
+         return 1;
+      }
+      if (ESP8266_BufferContains("ERROR") || ESP8266_BufferContains("SEND FAIL"))
+      {
+         return 0;
+      }
+      ESP8266_SoftDelayMs(1);
    }
-   return 1;
+
+   return 0;
 }
 
 const char *ESP8266_GetRxBuffer(void)
@@ -299,8 +313,7 @@ void USART2_IRQHandler(void)
       }
       else
       {
-         espRxIndex = 0;
-         espRxBuffer[espRxIndex] = '\0';
+         /* ?????????????????????? */
       }
 
       USART_ClearITPendingBit(USART2, USART_IT_RXNE);

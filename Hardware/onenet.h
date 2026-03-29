@@ -32,6 +32,7 @@ void mqtt_disconnect(void);
 
 uint8_t OneNet_MQTT_GetLastError(void);
 int8_t OneNet_MQTT_GetConnAckCode(void);
+uint8_t OneNet_MQTT_IsRawMode(void);
 
 uint8_t OneNet_MQTT_Connect(const char *host,
 							uint16_t port,
@@ -42,6 +43,7 @@ uint8_t OneNet_MQTT_Connect(const char *host,
 
 uint8_t OneNet_MQTT_Publish(const char *topic, const char *payload, uint8_t qos, uint8_t retain);
 uint8_t OneNet_MQTT_Subscribe(const char *topic, uint8_t qos);
+uint8_t OneNet_MQTT_Ping(void);
 void OneNet_MQTT_Disconnect(void);
 
 #endif
