@@ -95,7 +95,7 @@
 		onShow() {
 			setInterval(() => {
 				this.fetchDevData()
-			}, 3000)
+			}, 1000)
 		},
 		methods: {
 			fetchDevData() {
