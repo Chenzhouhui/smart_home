@@ -29,4 +29,3 @@
 .\output\mq.o: .\Library\stm32f10x_wwdg.h
 .\output\mq.o: .\Library\misc.h
 .\output\mq.o: Hardware\MQ.h
-.\output\mq.o: C:\Keil5\ARM\ARMCC\Bin\..\include\math.h

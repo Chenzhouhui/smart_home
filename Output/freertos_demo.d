@@ -11,6 +11,7 @@
 .\output\freertos_demo.o: .\FreeRTOS\include\mpu_wrappers.h
 .\output\freertos_demo.o: .\FreeRTOS\include\task.h
 .\output\freertos_demo.o: .\FreeRTOS\include\list.h
+.\output\freertos_demo.o: .\FreeRTOS\include\queue.h
 .\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\string.h
 .\output\freertos_demo.o: C:\Keil5\ARM\ARMCC\Bin\..\include\stdio.h
 .\output\freertos_demo.o: .\System\UART.h

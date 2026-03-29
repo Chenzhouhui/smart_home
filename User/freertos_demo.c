@@ -2,6 +2,7 @@
 /*FreeRTOS*********************************************************************************************/
 #include "FreeRTOS.h"
 #include "task.h"
+#include "queue.h"
 #include <string.h>
 
 /*其他头文件********************************************************************************************/
@@ -86,18 +87,42 @@ volatile float gAHT20_Temperature = 0;
 volatile uint8_t gAHT20_WorkState = 0;
 volatile float gBH1750_Lux = 0;
 volatile uint8_t gBH1750_WorkState = 0;
-volatile uint16_t gMQ4_AO = 0;
-volatile uint16_t gMQ7_AO = 0;
 volatile uint8_t gMQ4_DO = 0;
 volatile uint8_t gMQ7_DO = 0;
-volatile float gMQ4_PPM = 0;
-volatile float gMQ7_PPM = 0;
 volatile uint8_t gHC_SR501_State = 0;
 volatile uint8_t gLED_State = 0;
 volatile uint8_t gLED_CloudCtrl = 0;
 volatile uint8_t gLED_CloudState = 0;
 volatile uint8_t gWiFi_Connected = 0;
 volatile uint8_t gMQTT_Connected = 0;
+volatile TickType_t gLED_CloudCmdTick = 0;
+
+#define CLOUD_CTRL_TIMEOUT_MS 30000
+
+typedef struct
+{
+    float temperature;
+    float humidity;
+    float lux;
+    uint8_t ahtOk;
+    uint8_t luxOk;
+} EnvData_t;
+
+typedef struct
+{
+    uint8_t mq4Do;
+    uint8_t mq7Do;
+} GasData_t;
+
+typedef struct
+{
+    uint8_t human;
+    uint8_t led;
+} StatusData_t;
+
+static QueueHandle_t gEnvQueue = 0;
+static QueueHandle_t gGasQueue = 0;
+static QueueHandle_t gStatusQueue = 0;
 
 static int find_pattern(const uint8_t *buf, uint16_t len, const char *pat)
 {
@@ -274,11 +299,12 @@ static void process_cloud_led_cmd(void)
 
     if (ledChanged)
     {
-        printf("Cloud LED cmd -> %s\r\n", gLED_CloudState ? "ON" : "OFF");
+//        printf("Cloud LED cmd -> %s\r\n", gLED_CloudState ? "ON" : "OFF");
     }
 
     if (cmdSeen)
     {
+        gLED_CloudCmdTick = xTaskGetTickCount();
         ESP8266_ClearRxBuffer();
     }
 }
@@ -329,6 +355,11 @@ void freertos_demo(void)
 void start_task(void *pvParameters)
 {
     taskENTER_CRITICAL();           /* 进入临界区 */
+
+    gEnvQueue = xQueueCreate(1, sizeof(EnvData_t));
+    gGasQueue = xQueueCreate(1, sizeof(GasData_t));
+    gStatusQueue = xQueueCreate(1, sizeof(StatusData_t));
+
     /* 创建任务1 */
     xTaskCreate((TaskFunction_t )task1,
                 (const char*    )"task1",
@@ -402,13 +433,31 @@ void task2(void *pvParameters)
     int humidity10;
     int temp_abs10;
     int lux10;
-    uint32_t mq4ppm;
-    uint32_t mq7ppm;
+    int lastTemp10 = 0x7FFF;
+    int lastHumi10 = 0x7FFF;
+    int lastLux10 = 0x7FFF;
+    uint8_t lastAHT20State = 0xFF;
+    uint8_t lastBH1750State = 0xFF;
+    uint8_t lastMQ4DO = 0xFF;
+    uint8_t lastMQ7DO = 0xFF;
+    uint8_t lastHuman = 0xFF;
+    uint8_t lastWiFi = 0xFF;
+    uint8_t lastMQTT = 0xFF;
+    EnvData_t envData;
 
     AHT20_Init();
     BH1750_Init();
     LCD_Clear(WHITE);
     POINT_COLOR = BLACK;
+
+    LCD_ShowString(2,4,12,(u8 *)"temp:",1);
+    LCD_ShowString(2,20,12,(u8 *)"humi:",1);
+    LCD_ShowString(2,36,12,(u8 *)"lux:",1);
+    LCD_ShowString(2,52,12,(u8 *)"mq4do:",1);
+    LCD_ShowString(60,52,12,(u8 *)"mq7do:",1);
+    LCD_ShowString(2,68,12,(u8 *)"human:",1);
+    LCD_ShowString(70,68,12,(u8 *)"wifi:",1);
+    LCD_ShowString(70,84,12,(u8 *)"mqtt:",1);
 
     while(1)
     {
@@ -434,89 +483,134 @@ void task2(void *pvParameters)
             gBH1750_WorkState = 0;
         }
 
-        mq4ppm = (uint32_t)gMQ4_PPM;
-        mq7ppm = (uint32_t)gMQ7_PPM;
+        temp10 = (int)(gAHT20_Temperature * 10.0f);
+        humidity10 = (int)(gAHT20_Humidity * 10.0f);
+        lux10 = (int)(gBH1750_Lux * 10.0f);
 
-        LCD_Fill(0,0,127,127,WHITE);
-
-        if(gAHT20_WorkState)
+        if((gAHT20_WorkState != lastAHT20State) ||
+           (gAHT20_WorkState && ((temp10 != lastTemp10) || (humidity10 != lastHumi10))))
         {
-            humidity10 = (int)(gAHT20_Humidity * 10);
-            temp10 = (int)(gAHT20_Temperature * 10);
-            temp_abs10 = temp10;
-            if(temp_abs10 < 0)
-            {
-                temp_abs10 = -temp_abs10;
-            }
+            LCD_Fill(38,4,78,15,WHITE);
+            LCD_Fill(38,20,70,31,WHITE);
 
-            LCD_ShowString(2,4,12,(u8 *)"temp:",1);
-            if(temp10 < 0)
+            if(gAHT20_WorkState)
             {
-                LCD_ShowString(38,4,12,(u8 *)"-",1);
+                temp_abs10 = temp10;
+                if(temp_abs10 < 0)
+                {
+                    temp_abs10 = -temp_abs10;
+                }
+
+                if(temp10 < 0)
+                {
+                    LCD_ShowString(38,4,12,(u8 *)"-",1);
+                }
+                else
+                {
+                    LCD_ShowString(38,4,12,(u8 *)" ",1);
+                }
+                LCD_ShowNum(44,4,temp_abs10 / 10,2,12);
+                LCD_ShowString(56,4,12,(u8 *)".",1);
+                LCD_ShowNum(62,4,temp_abs10 % 10,1,12);
+
+                LCD_ShowNum(38,20,humidity10 / 10,2,12);
+                LCD_ShowString(50,20,12,(u8 *)".",1);
+                LCD_ShowNum(56,20,humidity10 % 10,1,12);
             }
             else
             {
-                LCD_ShowString(38,4,12,(u8 *)" ",1);
+                LCD_ShowString(38,4,12,(u8 *)"?",1);
+                LCD_ShowString(38,20,12,(u8 *)"?",1);
             }
-            LCD_ShowNum(44,4,temp_abs10 / 10,2,12);
-            LCD_ShowString(56,4,12,(u8 *)".",1);
-            LCD_ShowNum(62,4,temp_abs10 % 10,1,12);
 
-            LCD_ShowString(2,20,12,(u8 *)"humi:",1);
-            LCD_ShowNum(38,20,humidity10 / 10,2,12);
-            LCD_ShowString(50,20,12,(u8 *)".",1);
-            LCD_ShowNum(56,20,humidity10 % 10,1,12);
-        }
-        else
-        {
-            LCD_ShowString(2,4,12,(u8 *)"temp:?",1);
-            LCD_ShowString(2,20,12,(u8 *)"humi:?",1);
+            lastAHT20State = gAHT20_WorkState;
+            lastTemp10 = temp10;
+            lastHumi10 = humidity10;
         }
 
-        if(gBH1750_WorkState)
+        if((gBH1750_WorkState != lastBH1750State) ||
+           (gBH1750_WorkState && (lux10 != lastLux10)))
         {
-            lux10 = (int)(gBH1750_Lux * 10.0f);
-            LCD_ShowString(2,36,12,(u8 *)"lux:",1);
-            LCD_ShowNum(30,36,lux10 / 10,5,12);
-            LCD_ShowString(60,36,12,(u8 *)".",1);
-            LCD_ShowNum(66,36,lux10 % 10,1,12);
-        }
-        else
-        {
-            LCD_ShowString(2,36,12,(u8 *)"lux:?",1);
-        }
+            LCD_Fill(30,36,90,47,WHITE);
+            if(gBH1750_WorkState)
+            {
+                LCD_ShowNum(30,36,lux10 / 10,5,12);
+                LCD_ShowString(60,36,12,(u8 *)".",1);
+                LCD_ShowNum(66,36,lux10 % 10,1,12);
+            }
+            else
+            {
+                LCD_ShowString(30,36,12,(u8 *)"?",1);
+            }
 
-        LCD_ShowString(2,52,12,(u8 *)"mq4:",1);
-        LCD_ShowNum(30,52,mq4ppm,5,12);
-        LCD_ShowString(66,52,12,(u8 *)"ppm",1);
-
-        LCD_ShowString(2,68,12,(u8 *)"mq7:",1);
-        LCD_ShowNum(30,68,mq7ppm,5,12);
-        LCD_ShowString(66,68,12,(u8 *)"ppm",1);
-
-        LCD_ShowString(2,84,12,(u8 *)"mq4do:",1);
-        LCD_ShowNum(44,84,gMQ4_DO,1,12);
-        LCD_ShowString(60,84,12,(u8 *)"mq7do:",1);
-        LCD_ShowNum(102,84,gMQ7_DO,1,12);
-
-        LCD_ShowString(2,100,12,(u8 *)"human:",1);
-        if(gHC_SR501_State)
-        {
-            LCD_ShowString(38,100,12,(u8 *)"yes",1);
-        }
-        else
-        {
-            LCD_ShowString(38,100,12,(u8 *)"no",1);
+            lastBH1750State = gBH1750_WorkState;
+            lastLux10 = lux10;
         }
 
-        LCD_ShowString(70,100,12,(u8 *)"wifi:",1);
-        if(gWiFi_Connected)
+        if(gMQ4_DO != lastMQ4DO)
         {
-            LCD_ShowString(100,100,12,(u8 *)"OK",1);
+            LCD_Fill(44,52,55,63,WHITE);
+            LCD_ShowNum(44,52,gMQ4_DO,1,12);
+            lastMQ4DO = gMQ4_DO;
         }
-        else
+
+        if(gMQ7_DO != lastMQ7DO)
         {
-            LCD_ShowString(100,100,12,(u8 *)"FAIL",1);
+            LCD_Fill(102,52,113,63,WHITE);
+            LCD_ShowNum(102,52,gMQ7_DO,1,12);
+            lastMQ7DO = gMQ7_DO;
+        }
+
+        if(gHC_SR501_State != lastHuman)
+        {
+            LCD_Fill(38,68,62,79,WHITE);
+            if(gHC_SR501_State)
+            {
+                LCD_ShowString(38,68,12,(u8 *)"yes",1);
+            }
+            else
+            {
+                LCD_ShowString(38,68,12,(u8 *)"no",1);
+            }
+            lastHuman = gHC_SR501_State;
+        }
+
+        if(gWiFi_Connected != lastWiFi)
+        {
+            LCD_Fill(100,68,127,79,WHITE);
+            if(gWiFi_Connected)
+            {
+                LCD_ShowString(100,68,12,(u8 *)"OK",1);
+            }
+            else
+            {
+                LCD_ShowString(100,68,12,(u8 *)"FAIL",1);
+            }
+            lastWiFi = gWiFi_Connected;
+        }
+
+        if(gMQTT_Connected != lastMQTT)
+        {
+            LCD_Fill(100,84,127,95,WHITE);
+            if(gMQTT_Connected)
+            {
+                LCD_ShowString(100,84,12,(u8 *)"OK",1);
+            }
+            else
+            {
+                LCD_ShowString(100,84,12,(u8 *)"FAIL",1);
+            }
+            lastMQTT = gMQTT_Connected;
+        }
+
+        envData.temperature = gAHT20_Temperature;
+        envData.humidity = gAHT20_Humidity;
+        envData.lux = gBH1750_Lux;
+        envData.ahtOk = gAHT20_WorkState;
+        envData.luxOk = gBH1750_WorkState;
+        if(gEnvQueue != 0)
+        {
+            xQueueOverwrite(gEnvQueue, &envData);
         }
 
         vTaskDelay(500);
@@ -530,16 +624,23 @@ void task2(void *pvParameters)
  */
 void task3(void *pvParameters)
 {
+    GasData_t gasData;
+
     MQ_Init();
 
     while(1)
     {
-        gMQ4_AO = MQ4_ReadAO_Avg(8);
-        gMQ7_AO = MQ7_ReadAO_Avg(8);
         gMQ4_DO = MQ4_ReadDO();
         gMQ7_DO = MQ7_ReadDO();
-        gMQ4_PPM = MQ4_ReadPPM_FromAO(gMQ4_AO);
-        gMQ7_PPM = MQ7_ReadPPM_FromAO(gMQ7_AO);
+
+        gasData.mq4Do = gMQ4_DO;
+        gasData.mq7Do = gMQ7_DO;
+        if(gGasQueue != 0)
+        {
+            xQueueOverwrite(gGasQueue, &gasData);
+        }
+
+ //       printf("MQ dbg | MQ4 DO:%u | MQ7 DO:%u\r\n", gMQ4_DO, gMQ7_DO);
 
         vTaskDelay(300);
     }
@@ -552,11 +653,22 @@ void task3(void *pvParameters)
  */
 void task4(void *pvParameters)
 {
-    HC_SR501_Init();
-    
+    TickType_t nowTick;
+    StatusData_t statusData;
+
     while(1)
     {
         gHC_SR501_State = HC_SR501_ReadState();
+
+        if(gLED_CloudCtrl)
+        {
+            nowTick = xTaskGetTickCount();
+            if((nowTick - gLED_CloudCmdTick) > pdMS_TO_TICKS(CLOUD_CTRL_TIMEOUT_MS))
+            {
+                gLED_CloudCtrl = 0;
+            }
+        }
+
         if(gLED_CloudCtrl)
         {
             if(gLED_CloudState)
@@ -572,17 +684,26 @@ void task4(void *pvParameters)
         }
         else
         {
-            /* 仅保留云端控制，注释掉人体检测自动开灯逻辑
-            else if(gHC_SR501_State)
+            if(gHC_SR501_State)
             {
                 LED_ON();
                 gLED_State = 1;
             }
-            */
-            LED_OFF();
-            gLED_State = 0;
+            else
+            {
+                LED_OFF();
+                gLED_State = 0;
+            }
 
         }
+
+        statusData.human = gHC_SR501_State;
+        statusData.led = gLED_State;
+        if(gStatusQueue != 0)
+        {
+            xQueueOverwrite(gStatusQueue, &statusData);
+        }
+
         vTaskDelay(1000);
     }
 }
@@ -592,7 +713,6 @@ void task4(void *pvParameters)
  * @param       pvParameters : 传入参数(未用到)
  * @retval      无
  */
-//static char payload[512];
 void task5(void *pvParameters)
 {
     static char payload[256];
@@ -622,6 +742,18 @@ void task5(void *pvParameters)
     const char *coBool;
     const char *ch4Bool;
     const char *humanBool;
+    int payload_len;
+    EnvData_t envData;
+    GasData_t gasData;
+    StatusData_t statusData;
+
+    temperatureSnap = 0.0f;
+    humiditySnap = 0.0f;
+    luxSnap = 0.0f;
+    ledStateSnap = 0;
+    mq7DoSnap = 0;
+    mq4DoSnap = 0;
+    humanSnap = 0;
 
     ESP8266_Init(115200);
 
@@ -634,7 +766,7 @@ void task5(void *pvParameters)
             mqttSubscribed = 0;
             report_cnt = 0;
             ping_cnt = 0;
-            printf("Set WIFI_SSID/WIFI_PASSWORD in freertos_demo.c\r\n");
+//            printf("Set WIFI_SSID/WIFI_PASSWORD in freertos_demo.c\r\n");
             vTaskDelay(5000);
             continue;
         }
@@ -644,7 +776,7 @@ void task5(void *pvParameters)
             if(ESP8266_ConnectWiFi(WIFI_SSID, WIFI_PASSWORD, 15000))
             {
                 gWiFi_Connected = 1;
-                printf("ESP8266 WiFi connected\r\n");
+//                printf("ESP8266 WiFi connected\r\n");
             }
             else
             {
@@ -653,7 +785,7 @@ void task5(void *pvParameters)
                 mqttSubscribed = 0;
                 report_cnt = 0;
                 ping_cnt = 0;
-                printf("ESP8266 WiFi connect fail\r\n");
+//                printf("ESP8266 WiFi connect fail\r\n");
                 vTaskDelay(3000);
                 continue;
             }
@@ -673,17 +805,17 @@ void task5(void *pvParameters)
                 report_cnt = 0;
                 ping_cnt = 0;
                 publish_fail_cnt = 0;
-                printf("MQTT connected\r\n");
+//                printf("MQTT connected\r\n");
             }
             else
             {
                 gMQTT_Connected = 0;
-                printf("MQTT connect fail, err=%d\r\n", OneNet_MQTT_GetLastError());
-                printf("CONNACK code=%d\r\n", OneNet_MQTT_GetConnAckCode());
-                printf("ESP rsp: %s\r\n", ESP8266_GetRxBuffer());
+//                printf("MQTT connect fail, err=%d\r\n", OneNet_MQTT_GetLastError());
+//                printf("CONNACK code=%d\r\n", OneNet_MQTT_GetConnAckCode());
+//                printf("ESP rsp: %s\r\n", ESP8266_GetRxBuffer());
                 if(strstr(ESP8266_GetRxBuffer(), "Recv") != 0)
                 {
-                    printf("Tip: CONNECT sent, check OneNET auth/topic/client params\r\n");
+//                    printf("Tip: CONNECT sent, check OneNET auth/topic/client params\r\n");
                 }
                 vTaskDelay(3000);
                 continue;
@@ -695,7 +827,7 @@ void task5(void *pvParameters)
             if(OneNet_MQTT_Subscribe(MQTT_TOPIC_SUB, 0))
             {
                 mqttSubscribed = 1;
-                printf("MQTT subscribe ok: %s\r\n", MQTT_TOPIC_SUB);
+//                printf("MQTT subscribe ok: %s\r\n", MQTT_TOPIC_SUB);
             }
             else
             {
@@ -703,7 +835,7 @@ void task5(void *pvParameters)
                 mqttSubscribed = 0;
                 report_cnt = 0;
                 ping_cnt = 0;
-                printf("MQTT subscribe fail\r\n");
+//                printf("MQTT subscribe fail\r\n");
                 vTaskDelay(1000);
                 continue;
             }
@@ -721,13 +853,38 @@ void task5(void *pvParameters)
             report_cnt = 0;
             ping_cnt = 0;
             publish_fail_cnt = 0;
-            printf("MQTT link lost, reconnect\r\n");
+//            printf("MQTT link lost, reconnect\r\n");
             ESP8266_ClearRxBuffer();
             vTaskDelay(500);
             continue;
         }
 
         process_cloud_led_cmd();
+
+        if((gEnvQueue != 0) && (xQueueReceive(gEnvQueue, &envData, 0) == pdPASS))
+        {
+            if(envData.ahtOk)
+            {
+                temperatureSnap = envData.temperature;
+                humiditySnap = envData.humidity;
+            }
+            if(envData.luxOk)
+            {
+                luxSnap = envData.lux;
+            }
+        }
+
+        if((gGasQueue != 0) && (xQueueReceive(gGasQueue, &gasData, 0) == pdPASS))
+        {
+            mq4DoSnap = gasData.mq4Do;
+            mq7DoSnap = gasData.mq7Do;
+        }
+
+        if((gStatusQueue != 0) && (xQueueReceive(gStatusQueue, &statusData, 0) == pdPASS))
+        {
+            humanSnap = statusData.human;
+            ledStateSnap = statusData.led;
+        }
 
         if(ESP8266_GetRxLength() > (ESP8266_RX_BUFFER_SIZE * 3 / 4))
         {
@@ -744,7 +901,7 @@ void task5(void *pvParameters)
                 mqttSubscribed = 0;
                 report_cnt = 0;
                 publish_fail_cnt = 0;
-                printf("MQTT ping fail, reconnect\r\n");
+//                printf("MQTT ping fail, reconnect\r\n");
                 vTaskDelay(500);
                 continue;
             }
@@ -757,16 +914,6 @@ void task5(void *pvParameters)
             continue;
         }
         report_cnt = 0;
-
-        taskENTER_CRITICAL();
-        temperatureSnap = gAHT20_Temperature;
-        humiditySnap = gAHT20_Humidity;
-        luxSnap = gBH1750_Lux;
-        ledStateSnap = gLED_State;
-        mq7DoSnap = gMQ7_DO;
-        mq4DoSnap = gMQ4_DO;
-        humanSnap = gHC_SR501_State;
-        taskEXIT_CRITICAL();
 
         ledBool = ledStateSnap ? "true" : "false";
         coBool = mq7DoSnap ? "true" : "false";
@@ -798,7 +945,7 @@ void task5(void *pvParameters)
             luxFrac = -luxFrac;
         }
 
-        snprintf(payload,
+        payload_len = snprintf(payload,
              sizeof(payload),
              "{\"id\":\"%lu\",\"version\":\"1.0\",\"params\":{\"temp\":{\"value\":%d.%d},\"humi\":{\"value\":%d.%d},\"lux\":{\"value\":%d.%d},\"LED\":{\"value\":%s},\"CO\":{\"value\":%s},\"CH4\":{\"value\":%s},\"human\":{\"value\":%s}}}",
              (unsigned long)report_id,
@@ -813,12 +960,19 @@ void task5(void *pvParameters)
              ch4Bool,
              humanBool);
 
+        if((payload_len < 0) || (payload_len >= (int)sizeof(payload)))
+        {
+//            printf("MQTT payload overflow, skip report\r\n");
+            vTaskDelay(500);
+            continue;
+        }
+
         if(!OneNet_MQTT_Publish(MQTT_TOPIC_PUB, payload, 0, 0))
         {
             rsp = ESP8266_GetRxBuffer();
             publish_fail_cnt++;
-            printf("MQTT publish fail(%d/3)\r\n", publish_fail_cnt);
-            printf("PUB rsp: %s\r\n", rsp);
+//            printf("MQTT publish fail(%d/3)\r\n", publish_fail_cnt);
+//            printf("PUB rsp: %s\r\n", rsp);
 
             if(cloud_link_is_lost(rsp))
             {
@@ -831,7 +985,7 @@ void task5(void *pvParameters)
                 report_cnt = 0;
                 ping_cnt = 0;
                 publish_fail_cnt = 0;
-                printf("MQTT reconnect by link lost\r\n");
+//                printf("MQTT reconnect by link lost\r\n");
                 ESP8266_ClearRxBuffer();
                 vTaskDelay(500);
                 continue;
@@ -844,7 +998,7 @@ void task5(void *pvParameters)
                 report_cnt = 0;
                 ping_cnt = 0;
                 publish_fail_cnt = 0;
-                printf("MQTT reconnect triggered\r\n");
+//                printf("MQTT reconnect triggered\r\n");
             }
 
             vTaskDelay(1000);
@@ -854,7 +1008,7 @@ void task5(void *pvParameters)
         {
             publish_fail_cnt = 0;
             report_id++;
-            printf("MQTT pub: %s\r\n", payload);
+//            printf("MQTT pub: %s\r\n", payload);
         }
 
         vTaskDelay(100);
